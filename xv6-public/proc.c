@@ -38,10 +38,10 @@ struct cpu*
 mycpu(void)
 {
   int apicid, i;
-  
+
   if(readeflags()&FL_IF)
     panic("mycpu called with interrupts enabled\n");
-  
+
   apicid = lapicid();
   // APIC IDs are not guaranteed to be contiguous. Maybe we should have
   // a reverse map, or reserve a register to store &cpus[i].
@@ -124,7 +124,7 @@ userinit(void)
   extern char _binary_initcode_start[], _binary_initcode_size[];
 
   p = allocproc();
-  
+
   initproc = p;
   if((p->pgdir = setupkvm()) == 0)
     panic("userinit: out of memory?");
@@ -275,7 +275,7 @@ wait(void)
   struct proc *p;
   int havekids, pid;
   struct proc *curproc = myproc();
-  
+
   acquire(&ptable.lock);
   for(;;){
     // Scan through table looking for exited children.
@@ -325,7 +325,7 @@ scheduler(void)
   struct proc *p;
   struct cpu *c = mycpu();
   c->proc = 0;
-  
+
   for(;;){
     // Enable interrupts on this processor.
     sti();
@@ -418,7 +418,7 @@ void
 sleep(void *chan, struct spinlock *lk)
 {
   struct proc *p = myproc();
-  
+
   if(p == 0)
     panic("sleep");
 
@@ -500,35 +500,159 @@ kill(int pid)
 // Print a process listing to console.  For debugging.
 // Runs when user types ^P on console.
 // No lock to avoid wedging a stuck machine further.
-void
-procdump(void)
+uint pagePositionUsed(pte_t *ptabentry)
 {
-  static char *states[] = {
-  [UNUSED]    "unused",
-  [EMBRYO]    "embryo",
-  [SLEEPING]  "sleep ",
-  [RUNNABLE]  "runble",
-  [RUNNING]   "run   ",
-  [ZOMBIE]    "zombie"
-  };
-  int i;
-  struct proc *p;
-  char *state;
-  uint pc[10];
+	int i;
 
-  for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
-    if(p->state == UNUSED)
-      continue;
-    if(p->state >= 0 && p->state < NELEM(states) && states[p->state])
-      state = states[p->state];
-    else
-      state = "???";
-    cprintf("%d %s %s", p->pid, state, p->name);
-    if(p->state == SLEEPING){
-      getcallerpcs((uint*)p->context->ebp+2, pc);
-      for(i=0; i<10 && pc[i] != 0; i++)
-        cprintf(" %p", pc[i]);
-    }
-    cprintf("\n");
+	for(i=0; i<NPTENTRIES; i++)
+	{
+    	if((ptabentry[i] & PTE_U) && (ptabentry[i] & PTE_P))
+    	{
+        	return 1;
+    	}
+	}
+	return 0;
+}
+
+void procdump(void)
+{
+	static char *states[] = {
+  	[UNUSED]    "unused",
+  	[EMBRYO]    "embryo",
+  	[SLEEPING]  "sleep ",
+  	[RUNNABLE]  "runble",
+  	[RUNNING]   "run   ",
+  	[ZOMBIE]    "zombie"
+  	};
+  	int i;
+  	struct proc *p;
+  	char *state;
+  	uint pc[10];
+
+  	/*Declara\E7\F5es Adicionais*/
+  	pte_t *pdirentry; 			// Endereco virtual do diretorio de paginas.
+  	pte_t *ptabentry_phis; 			// Endereco fisico para a tabela de p\E1ginas.
+  	pte_t *ptabentry_virt;	// Endereco virtual para a tabela de p\E1ginas.
+  	pte_t *phispagnum; 			// PPN.
+  	pte_t *virtpagnum; 			// VPN.
+  	int dirindex;				// \CDndice de diret\F3rio.
+  	int pageindex;				// \CDndice de p\E1ginas.
+
+  	for(p = ptable.proc; p < &ptable.proc[NPROC]; p++)
+  	{
+    	if(p->state == UNUSED)
+      		continue;
+    	if(p->state >= 0 && p->state < NELEM(states) && states[p->state])
+      		state = states[p->state];
+    	else
+      		state = "???";
+
+    	cprintf("%d %s %s", p->pid, state, p->name);
+
+    	if(p->state == SLEEPING)
+		{
+      		getcallerpcs((uint*)p->context->ebp+2, pc);
+
+      		for(i=0; i<10 && pc[i] != 0; i++)
+        		cprintf(" %p", pc[i]);
+    	}
+    	cprintf("\n");
+
+    	/* Exibi\E7\F5es adicionais da Tarefa 1: */
+
+		pdirentry = p->pgdir; // Adquire o endere\E7o para do diret\F3rio de p\E1ginas.
+
+		cprintf("Page tables:\n");
+		cprintf("	memory location of page directory = %p\n", V2P(pdirentry)); // Exibi\E7\E3o do endere\E7o f\EDsico do diret\F3rio de p\E1ginas.
+
+		for (dirindex = 0; dirindex < NPDENTRIES; dirindex++) // Loop para a leitura do diret\F3rio de p\E1ginas nas posi\E7\F5es at\E9 NPDENTRIES.
+		{
+    		// Informa\E7\F5es do Diret\F3rio:
+    		ptabentry_phis = (pte_t*)PTE_ADDR(pdirentry[dirindex]); 	// Endereco fisico da pagina na posi\E7\E3o lida.
+    		ptabentry_virt = P2V(ptabentry_phis); 						// Endereco virutal da pagina na posi\E7\E3o lida.
+    		phispagnum = (pte_t*)(PTE_ADDR(pdirentry[dirindex]) >> 12);	// PNN da pagina na posi\E7\E3o lida.
+
+    		if ((pdirentry[dirindex] & PTE_U) && (pdirentry[dirindex] & PTE_P) && pagePositionUsed(ptabentry_virt))
+    		{
+        		cprintf("	pdir PTE %d, %p:\n", dirindex, phispagnum); // Exibi\E7\E3o do \EDndice do diret\F3rio e do PPN.
+        		cprintf("    	Memory location of page table = %p\n", ptabentry_phis); // Exibi\E7\E3o do endere\E7o f\EDsico da tabela de p\E1ginas.
+
+        		// Informa\E7\F5es das P\E1ginas:
+        		for (pageindex = 0; pageindex < NPTENTRIES; pageindex++) // Loop para a leitura da tabela de p\E1ginas nas posi\E7\F5es at\E9 NPDENTRIES.
+        		{
+            		if ((ptabentry_virt[pageindex] & PTE_P) && (ptabentry_virt[pageindex] & PTE_U))
+            		{
+                		// Exibi\E7\E3o do \EDndice das p\E1ginas, PPN e endere\E7o f\EDsico das p\E1ginas:
+                		cprintf("   	ptbl PTE %d", pageindex);
+                		cprintf(", %p", (PTE_ADDR(ptabentry_virt[pageindex]) >> 12));
+                		cprintf(", %p", PTE_ADDR(ptabentry_virt[pageindex]));
+                		cprintf(", SHARE: %d\n", getCountPPN(PTE_ADDR(ptabentry_virt[pageindex])));
+            		}
+        		}
+    		}
+		}
+
+		cprintf("Page mappings:\n"); //Mostra o mapeamento de endere\E7o virtual em endere\E7o f\EDsico das p\E1ginas:
+
+		for (dirindex = 0; dirindex < NPDENTRIES; dirindex++) //Percorre o diret\F3rio:
+		{
+    		ptabentry_phis = (pte_t*)PTE_ADDR(pdirentry[dirindex]);
+    		ptabentry_virt = P2V(ptabentry_phis);
+    		virtpagnum = (pte_t*)(PTE_ADDR(ptabentry_virt) >> 12);
+    		phispagnum = (pte_t*)((int)ptabentry_phis >> 12);
+
+    		if ((pdirentry[dirindex] & PTE_P) && (pdirentry[dirindex] & PTE_U) && pagePositionUsed(ptabentry_virt))
+    		{
+        		cprintf("%x -> %x\n", virtpagnum, phispagnum); // "VPN -> PPN"
+    		}
+		}
+  	}
+}
+
+
+int cowfork(void){
+  int i, pid;
+  struct proc *np;
+
+  // // Realiza o processo de alocação do processo a ser criado.
+  if((np = allocproc()) == 0)
+    return -1;
+
+  // Aqui está a principal diferenca do fork original
+  // Ao invés de copiar a memória do pai para o filho,
+  // é realizado o compartilhamento pela função share_cow
+  if((np->pgdir = share_cow(myproc()->pgdir, myproc()->sz)) == 0){
+    kfree(np->kstack);
+    np->kstack = 0;
+    np->state = UNUSED;
+    return -1;
   }
+
+  np->sz = myproc()->sz;
+  np->parent = myproc();
+  *np->tf = *myproc()->tf;
+
+  // Clear %eax so that fork returns 0 in the child.
+  np->tf->eax = 0;
+
+  // Indica que, tanto o  processo pai quanto o processo filho contém paginas
+  // compartilhadas
+  myproc()->shared = 1;
+  np->shared = 1;
+
+  for(i = 0; i < NOFILE; i++)
+    if(myproc()->ofile[i])
+      np->ofile[i] = filedup(myproc()->ofile[i]);
+  np->cwd = idup(myproc()->cwd);
+
+  safestrcpy(np->name, myproc()->name, sizeof(myproc()->name));
+
+  pid = np->pid;
+
+  // lock to force the compiler to emit the np->state write last.
+  acquire(&ptable.lock);
+  np->state = RUNNABLE;
+  release(&ptable.lock);
+
+  return pid;
 }

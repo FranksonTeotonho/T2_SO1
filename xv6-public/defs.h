@@ -106,6 +106,7 @@ int             pipewrite(struct pipe*, char*, int);
 int             cpuid(void);
 void            exit(void);
 int             fork(void);
+int             cowfork(void);
 int             growproc(int);
 int             kill(int);
 struct cpu*     mycpu(void);
@@ -185,6 +186,19 @@ void            switchuvm(struct proc*);
 void            switchkvm(void);
 int             copyout(pde_t*, uint, void*, uint);
 void            clearpteu(pde_t *pgdir, char *uva);
+
+
+//================ COW ======================
+pde_t*          share_cow(pde_t*, uint);
+void            handle_pgflt (void);
+int             copyuvm_cow(uint);
+void            sharetableinit(void);
+int             getCountPPN(uint);
+void            incCountPPN(uint);
+void            decCountPPN(uint);
+void            freevm_cow(pde_t*);
+//===========================================
+
 
 // number of elements in fixed-size array
 #define NELEM(x) (sizeof(x)/sizeof((x)[0]))

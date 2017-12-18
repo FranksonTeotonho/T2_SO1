@@ -141,6 +141,7 @@ struct segdesc {
 #define PTE_D           0x040   // Dirty
 #define PTE_PS          0x080   // Page Size
 #define PTE_MBZ         0x180   // Bits must be zero
+#define PTE_SHARE       0x100   // Flag para indicar se a página é compartilhada ou não
 
 // Address in page table or page directory entry
 #define PTE_ADDR(pte)   ((uint)(pte) & ~0xFFF)

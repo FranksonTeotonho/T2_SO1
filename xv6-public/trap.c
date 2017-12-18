@@ -46,6 +46,13 @@ trap(struct trapframe *tf)
     return;
   }
 
+  if (tf->trapno == T_PGFLT) {
+  myproc()->tf = tf;
+  // Lida com a questão de tratar o pagefault ocorrido
+  handle_pgflt();
+  return;
+}
+
   switch(tf->trapno){
   case T_IRQ0 + IRQ_TIMER:
     if(cpuid() == 0){

@@ -6,6 +6,56 @@
 #include "mmu.h"
 #include "proc.h"
 #include "elf.h"
+#include "spinlock.h"
+
+/*
+Início da alteração no arquivo para implementação de vetor de
+contagem de processos compartilhados por um segmento físico da
+memória
+*/
+//=============================== COW ================================
+#define TAMSHARETABLE PHYSTOP >> 12 //O maximo de memória que pode ser mapeada
+// Tabela que informa a quantidade de processos que estão utilizando o mesmo espaço de memória
+static int shareTable[TAMSHARETABLE]; // tabela que possui entrada para todas as paginas da memoria
+
+// Estura utilizada para bloquear o código crítico de quando é necessário
+// Realizar mudanças na shareTable
+struct spinlock tablelock;
+
+// Configura o tablelock e inicia a tabela de compartilhamento de paginas
+void sharetableinit(void)
+{
+  initlock(&tablelock, "sharetable");
+  int i;
+
+  acquire(&tablelock);
+  for(i=0; i< TAMSHARETABLE; i++){
+    shareTable[i]=0;
+  }
+  release(&tablelock);
+
+  cprintf("Inicializacao da ShareTable concluida\n");
+}
+
+int getCountPPN(uint pa){
+
+  int index = (pa >> 12) & 0xFFFFF; // recupera o PPN do PA passado
+  return shareTable[index]; // Retorna o numero de processos que estão compartilhando a mesma pagina de memoria fisica
+}
+
+void incCountPPN(uint pa){
+
+  int index = (pa >> 12) & 0xFFFFF; // recupera o PPN do PA passado
+  shareTable[index]++; // Incrementa o numero de processos que estão compartilhando a posiçao de memória
+}
+
+void decCountPPN(uint pa){
+
+  int index = (pa >> 12) & 0xFFFFF; // recupera o PPN do PA passado
+  shareTable[index]--; // Decrementa o numero de compartilhamento quando um dos processos deixa de utlizar a posicao de memoria
+}
+//===============================================================
+
 
 extern char data[];  // defined by kernel.ld
 pde_t *kpgdir;  // for use in scheduler()
@@ -390,3 +440,171 @@ copyout(pde_t *pgdir, uint va, void *p, uint len)
 //PAGEBREAK!
 // Blank page.
 
+//=========================== COW ===========================
+
+pde_t* share_cow(pde_t *pgdir, uint sz)
+{
+  pde_t *d;
+  pte_t *pte;
+  uint pa, i, flags;
+
+  if((d = setupkvm()) == 0)
+    return 0;
+
+  acquire(&tablelock);
+  for(i = PGSIZE; i < sz; i += PGSIZE){
+    if((pte = walkpgdir(pgdir, (void *) i, 0)) == 0)
+      panic("copyuvm: pte should exist");
+    if(!(*pte & PTE_P))
+      panic("copyuvm: page not present");
+    *pte &= ~PTE_W; // torna read-only (desabilita a escrita)
+    *pte |= PTE_SHARE; // Indica que a página é compartilhada
+    pa = PTE_ADDR(*pte);
+    flags = PTE_FLAGS(*pte);
+
+    // instead of create new pages, remap the pages for cow child
+    if(mappages(d, (void*)i, PGSIZE, pa, flags) < 0)
+      goto bad;
+
+    if(getCountPPN(pa) == 0){
+      incCountPPN(pa);
+      incCountPPN(pa);
+    }
+    else{
+      incCountPPN(pa);
+    }
+
+    // cprintf("pid: %d index: %p count: %d\n", myproc()->pid, pa, getCountPPN(pa));
+  }
+  release(&tablelock);
+
+  lcr3(V2P(myproc()->pgdir)); // atualiza o TLB
+
+  return d;
+
+bad:
+  freevm(d);
+  return 0;
+}
+
+void handle_pgflt(void){
+  // Recupera o endereço virtual onde ocorreu o pagefault (armazenado no registrador cr2)
+  uint addr = rcr2();
+  // Se o endereço que tentou ser acessado foi o 0 - avisar que foi um
+  // null pointer Exception
+  if (addr == 0) {
+    cprintf("Segmentation Fault - Null Pointer Dereference\n");
+    kill(myproc()->pid);
+  }
+  // Se o processo possui paginas compartilhadas, realiza a cópia da memoria
+  // que causou o pagefault (por ser read only)
+  else{
+    // Recupera o Page Table Entry do endereço acima para o processo atual
+    pte_t* pte = walkpgdir(myproc()->pgdir, (void *) addr, 0);
+
+    if(PTE_FLAGS(*pte)&PTE_SHARE){
+        copyuvm_cow(addr);
+        cprintf("Page Fault: cowfork \n");
+    }
+    else{
+      cprintf("Segmentation Fault - Writing to Read-only Memory\n");
+      kill(myproc()->pid);
+    }
+  }
+}
+
+int copyuvm_cow(uint addr)
+{
+  uint pa;
+  pte_t *pte;
+  char *mem;
+
+  // Recupera o Page Table Entry do endereço acima para o processo atual
+  pte = walkpgdir(myproc()->pgdir, (void *) addr, 0);
+  pa = PTE_ADDR(*pte);
+
+  acquire(&tablelock);
+  // Se pagina está sendo compartilhada
+  if (getCountPPN(pa) > 1) {
+    if((mem = kalloc()) == 0) // aloca uma nova página de memoria
+      goto bad;
+    memmove(mem, (char*)P2V(pa), PGSIZE);
+    *pte &= 0xFFF; // pega todas as flags de pte
+    *pte &= ~PTE_SHARE; // retira a flag de compartilhamento
+    *pte |= V2P(mem) | PTE_W; // insere a permissão de escrita na nova pagina de memória
+    decCountPPN(pa); // Decrementa a quantidade de processos que estão compartilhando a mesma memória
+  }
+  // Se há apenas um processo usando a pagina, basta dar permissão para escrita e retira a flag de compartilhamento
+  else {
+    *pte |= PTE_W;
+    *pte &= ~PTE_SHARE;
+  }
+
+  release(&tablelock);
+
+  lcr3(V2P(myproc()->pgdir)); // flush the TLB
+
+  return 1;
+
+bad:
+  return 0;
+}
+// Desaloca a memoria virtual apontada por pgdir
+int deallocuvm_cow(pde_t *pgdir, uint oldsz, uint newsz)
+{
+  pte_t *pte;
+  uint a, pa;
+
+  if(newsz >= oldsz)
+    return oldsz;
+
+  a = PGROUNDUP(newsz);
+  // Será realizada mudanças na shareTable, é necessário bloquea-la, para que não haja problema de concorrência e a torne inválida
+  acquire(&tablelock);
+  for(; a < oldsz; a += PGSIZE){
+    pte = walkpgdir(pgdir, (char*)a, 0);
+    if(!pte)
+      a += (NPTENTRIES - 1) * PGSIZE;
+    else if((*pte & PTE_P) != 0){
+      pa = PTE_ADDR(*pte);
+      if(pa == 0)
+        panic("kfree");
+      // Se a memoria está sendo compartilhada, decrementa a quantidade de processos que estão compartilhando
+      // Pois está sendo desalocada do processo atual
+      if (getCountPPN(pa) > 1) {
+        decCountPPN(pa);
+      }
+      // se a memoria não está sendo compartilhada com nenhum outro processo
+      // pode ser liberada completamente
+      else {
+        char *v = P2V(pa);
+        kfree(v);
+        decCountPPN(pa);
+      }
+      // Faz o ponteiro para page table entry apontar para null
+      *pte = 0;
+    }
+  }
+  release(&tablelock);
+  return newsz;
+}
+// Libera a memoria virtual de um processo que utilizou o share_cow
+void freevm_cow(pde_t *pgdir)
+{
+  uint i;
+
+  if(pgdir == 0)
+    panic("freevm: no pgdir");
+  // Desaloca as page tabels
+  deallocuvm_cow(pgdir, KERNBASE, 0);
+
+  // desaloca os page directories
+  for(i = 0; i < NPDENTRIES; i++){
+    if(pgdir[i] & PTE_P){
+      char *v = P2V(PTE_ADDR(pgdir[i]));
+      kfree(v);
+    }
+  }
+  kfree((char*)pgdir);
+}
+// ==========================================================================

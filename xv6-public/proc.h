@@ -49,6 +49,7 @@ struct proc {
   struct file *ofile[NOFILE];  // Open files
   struct inode *cwd;           // Current directory
   char name[16];               // Process name (debugging)
+  int shared;                  // flag para indicar se o processo é compartilhado
 };
 
 // Process memory is laid out contiguously, low addresses first:
