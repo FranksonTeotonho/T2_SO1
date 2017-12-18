@@ -98,6 +98,12 @@ trap(struct trapframe *tf)
             "eip 0x%x addr 0x%x--kill proc\n",
             myproc()->pid, myproc()->name, tf->trapno,
             tf->err, cpuid(), tf->eip, rcr2());
+	
+    //Modificação para task 2, mensagem de erro
+    if (rcr2() == 0 && tf->trapno == 14) {
+              cprintf("Task 2: Null pointer protection. Error: Segmentation Fault\n");
+            }
+
     myproc()->killed = 1;
   }
 

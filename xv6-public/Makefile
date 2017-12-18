@@ -140,14 +140,19 @@ vectors.S: vectors.pl
 ULIB = ulib.o usys.o printf.o umalloc.o
 
 _%: %.o $(ULIB)
-	$(LD) $(LDFLAGS) -N -e main -Ttext 0 -o $@ $^
+	#$(LD) $(LDFLAGS) -N -e main -Ttext 0 -o $@ $^
+	#Modificações para task 2
+	#Ponto de inicio definido para a segunda pagina
+	$(LD) $(LDFLAGS) -N -e main -Ttext 0x1000 -o $@ $^
 	$(OBJDUMP) -S $@ > $*.asm
 	$(OBJDUMP) -t $@ | sed '1,/SYMBOL TABLE/d; s/ .* / /; /^$$/d' > $*.sym
 
 _forktest: forktest.o $(ULIB)
 	# forktest has less library code linked in - needs to be small
 	# in order to be able to max out the proc table.
-	$(LD) $(LDFLAGS) -N -e main -Ttext 0 -o _forktest forktest.o ulib.o usys.o
+	#$(LD) $(LDFLAGS) -N -e main -Ttext 0 -o _forktest forktest.o ulib.o usys.o
+	#Modificações para task 2	
+	$(LD) $(LDFLAGS) -N -e main -Ttext 0x1000 -o _forktest forktest.o ulib.o usys.o
 	$(OBJDUMP) -S _forktest > forktest.asm
 
 mkfs: mkfs.c fs.h
@@ -159,6 +164,7 @@ mkfs: mkfs.c fs.h
 # http://www.gnu.org/software/make/manual/html_node/Chained-Rules.html
 .PRECIOUS: %.o
 
+#Task 2: Adicionado o teste para Null pointer Protection
 UPROGS=\
 	_cat\
 	_echo\
@@ -176,6 +182,7 @@ UPROGS=\
 	_wc\
 	_zombie\
 	_testeCowfork\
+	_testNullPointerProtection\
 
 fs.img: mkfs README $(UPROGS)
 	./mkfs fs.img README $(UPROGS)
@@ -242,8 +249,9 @@ qemu-nox-gdb: fs.img xv6.img .gdbinit
 # rename it to rev0 or rev1 or so on and then
 # check in that version.
 
+#Task 2: Adicionado o teste para Null pointer Protection
 EXTRA=\
-	mkfs.c ulib.c user.h cat.c echo.c forktest.c grep.c testeCowfork.c kill.c\
+	mkfs.c ulib.c user.h cat.c echo.c forktest.c grep.c testNullPointerProtection.c testeCowfork.c kill.c\
 	ln.c ls.c mkdir.c rm.c stressfs.c usertests.c wc.c zombie.c\
 	printf.c umalloc.c\
 	README dot-bochsrc *.pl toc.* runoff runoff1 runoff.list\

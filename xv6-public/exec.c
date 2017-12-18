@@ -38,8 +38,17 @@ exec(char *path, char **argv)
   if((pgdir = setupkvm()) == 0)
     goto bad;
 
-  // Load program into memory.
-  sz = 0;
+ // Load program into memory.
+ 
+  // sz recebia a pagina  para a inicialização
+
+  // sz = 0
+
+  // Modificado para a task 2
+
+  // sz recebe o tamanho de uma pagina, Logo a inicialização pula a primeira pagina (Pagina 0) e vai diretamente para a segunda
+
+  sz = PGSIZE-1;
   for(i=0, off=elf.phoff; i<elf.phnum; i++, off+=sizeof(ph)){
     if(readi(ip, (char*)&ph, off, sizeof(ph)) != sizeof(ph))
       goto bad;

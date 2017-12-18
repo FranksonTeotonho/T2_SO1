@@ -372,7 +372,13 @@ copyuvm(pde_t *pgdir, uint sz)
 
   if((d = setupkvm()) == 0)
     return 0;
-  for(i = 0; i < sz; i += PGSIZE){
+
+  //A copia era criada a partir da primeire pagina (pagina 0)
+  //for(i = 0; i < sz; i += PGSIZE){
+
+  //Modificações para a task 2
+  //A variavel de controle é iniciada a partir da segunda pagina, evitando a copia da primeira pagina (pagina 0)
+  for(i = PGSIZE; i < sz; i += PGSIZE){
     if((pte = walkpgdir(pgdir, (void *) i, 0)) == 0)
       panic("copyuvm: pte should exist");
     if(!(*pte & PTE_P))
