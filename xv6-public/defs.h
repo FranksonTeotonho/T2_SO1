@@ -180,7 +180,7 @@ int             allocuvm(pde_t*, uint, uint);
 int             deallocuvm(pde_t*, uint, uint);
 void            freevm(pde_t*);
 void            inituvm(pde_t*, char*, uint);
-int             loaduvm(pde_t*, char*, struct inode*, uint, uint);
+int             loaduvm(pde_t*, char*, struct inode*, uint, uint, uint);
 pde_t*          copyuvm(pde_t*, uint);
 void            switchuvm(struct proc*);
 void            switchkvm(void);
@@ -192,10 +192,10 @@ void            clearpteu(pde_t *pgdir, char *uva);
 pde_t*          share_cow(pde_t*, uint);
 void            handle_pgflt (void);
 int             copyuvm_cow(uint);
-void            sharetableinit(void);
-int             getCountPPN(uint);
-void            incCountPPN(uint);
-void            decCountPPN(uint);
+void            Shared_Tableinit(void);
+int             get_Count_PPN(uint);
+void            inc_Count_PPN(uint);
+void            dec_Count_PPN(uint);
 void            freevm_cow(pde_t*);
 //===========================================
 

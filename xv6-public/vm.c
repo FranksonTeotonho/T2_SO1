@@ -14,45 +14,51 @@ contagem de processos compartilhados por um segmento físico da
 memória
 */
 //=============================== COW ================================
-#define TAMSHARETABLE PHYSTOP >> 12 //O maximo de memória que pode ser mapeada
+#define size_Shared_Table PHYSTOP >> 12 //O maximo de memória que pode ser mapeada
 // Tabela que informa a quantidade de processos que estão utilizando o mesmo espaço de memória
-static int shareTable[TAMSHARETABLE]; // tabela que possui entrada para todas as paginas da memoria
+static int Shared_Table[size_Shared_Table]; // tabela que possui entrada para todas as paginas da memoria
 
 // Estura utilizada para bloquear o código crítico de quando é necessário
-// Realizar mudanças na shareTable
+// Realizar mudanças na Shared_Table
 struct spinlock tablelock;
 
 // Configura o tablelock e inicia a tabela de compartilhamento de paginas
-void sharetableinit(void)
+void Shared_Tableinit(void)
 {
-  initlock(&tablelock, "sharetable");
+  initlock(&tablelock, "Shared_Table");
   int i;
 
   acquire(&tablelock);
-  for(i=0; i< TAMSHARETABLE; i++){
-    shareTable[i]=0;
+  for(i=0; i< size_Shared_Table; i++){
+    Shared_Table[i]=0;
   }
   release(&tablelock);
 
-  cprintf("Inicializacao da ShareTable concluida\n");
+  cprintf("Inicializacao da Shared_Table concluida\n");
 }
 
-int getCountPPN(uint pa){
+int get_Count_PPN(uint pa){
 
-  int index = (pa >> 12) & 0xFFFFF; // recupera o PPN do PA passado
-  return shareTable[index]; // Retorna o numero de processos que estão compartilhando a mesma pagina de memoria fisica
+  int index = (pa >> 12) & 0xFFFFF; // obtém o PPN do PA passado
+  return Shared_Table[index]; // Retorna o numero de processos que estão compartilhando a mesma pagina de memoria fisica
 }
 
-void incCountPPN(uint pa){
+void inc_Count_PPN(uint pa){
 
-  int index = (pa >> 12) & 0xFFFFF; // recupera o PPN do PA passado
-  shareTable[index]++; // Incrementa o numero de processos que estão compartilhando a posiçao de memória
+  int index = (pa >> 12) & 0xFFFFF; // obtém o PPN do PA passado
+  Shared_Table[index]++; // Incrementa o numero de processos que estão compartilhando a posiçao de memória
 }
 
-void decCountPPN(uint pa){
+void inc_initial_PPN(uint pa){
 
-  int index = (pa >> 12) & 0xFFFFF; // recupera o PPN do PA passado
-  shareTable[index]--; // Decrementa o numero de compartilhamento quando um dos processos deixa de utlizar a posicao de memoria
+  int index = (pa >> 12) & 0xFFFFF; // obtém o PPN do PA passado
+  Shared_Table[index]+= 2; // adiciona 2 ao contador pois, inicialmente, se compartilha a memoria entre o pai e o filho
+}
+
+void dec_Count_PPN(uint pa){
+
+  int index = (pa >> 12) & 0xFFFFF; // obtém o PPN do PA passado
+  Shared_Table[index]--; // Decrementa o contador de processos compartilhados quando um dos processos deixa de utlizar a posicao de memoria
 }
 //===============================================================
 
@@ -245,7 +251,7 @@ inituvm(pde_t *pgdir, char *init, uint sz)
 // Load a program segment into pgdir.  addr must be page-aligned
 // and the pages from addr to addr+sz must already be mapped.
 int
-loaduvm(pde_t *pgdir, char *addr, struct inode *ip, uint offset, uint sz)
+loaduvm(pde_t *pgdir, char *addr, struct inode *ip, uint offset, uint sz, uint perm)
 {
   uint i, pa, n;
   pte_t *pte;
@@ -256,6 +262,17 @@ loaduvm(pde_t *pgdir, char *addr, struct inode *ip, uint offset, uint sz)
     if((pte = walkpgdir(pgdir, addr+i, 0)) == 0)
       panic("loaduvm: address should exist");
     pa = PTE_ADDR(*pte);
+
+    perm = perm & PTE_W;  // AND Bitwise realizado para verificação se o parâmetro perm é 0 ou 1
+                          //O parâmetro perm dirá se deve ser escrito algo no arquivo ou não
+
+    if(perm == 0){  // Se o arquivo não tem permissão de escrita
+        *pte &= ~PTE_W;  // Desativa o flag de escrita (Modo Read Only)
+    }
+    else{ // Senão, o arquivo tem permissão de escrita
+      *pte = perm | *pte;  // Ativa o flag de escrita
+    }
+
     if(sz - i < PGSIZE)
       n = sz - i;
     else
@@ -446,7 +463,7 @@ copyout(pde_t *pgdir, uint va, void *p, uint len)
 //PAGEBREAK!
 // Blank page.
 
-//=========================== COW ===========================
+
 
 pde_t* share_cow(pde_t *pgdir, uint sz)
 {
@@ -463,24 +480,22 @@ pde_t* share_cow(pde_t *pgdir, uint sz)
       panic("copyuvm: pte should exist");
     if(!(*pte & PTE_P))
       panic("copyuvm: page not present");
-    *pte &= ~PTE_W; // torna read-only (desabilita a escrita)
-    *pte |= PTE_SHARE; // Indica que a página é compartilhada
-    pa = PTE_ADDR(*pte);
-    flags = PTE_FLAGS(*pte);
+    *pte &= ~PTE_W; // torna read-only ao desabilitar a escrita
+    *pte |= PTE_SHARE; // aciona a flag de compartilhamento que foi implementada
+    pa = PTE_ADDR(*pte); //referencia o ponteiro do PTE do pai
+    flags = PTE_FLAGS(*pte); // referencia as flags do PTE do pai
 
-    // instead of create new pages, remap the pages for cow child
+    // mapeia as paginas do pai para o filho, sem copiar
     if(mappages(d, (void*)i, PGSIZE, pa, flags) < 0)
       goto bad;
 
-    if(getCountPPN(pa) == 0){
-      incCountPPN(pa);
-      incCountPPN(pa);
+    if(get_Count_PPN(pa) == 0){
+      inc_initial_PPN(pa); // cenario inicial de compartilhamento de memoria
     }
     else{
-      incCountPPN(pa);
+      inc_Count_PPN(pa); // situações subsequentes do compartilhamento
     }
 
-    // cprintf("pid: %d index: %p count: %d\n", myproc()->pid, pa, getCountPPN(pa));
   }
   release(&tablelock);
 
@@ -531,14 +546,14 @@ int copyuvm_cow(uint addr)
 
   acquire(&tablelock);
   // Se pagina está sendo compartilhada
-  if (getCountPPN(pa) > 1) {
+  if (get_Count_PPN(pa) > 1) {
     if((mem = kalloc()) == 0) // aloca uma nova página de memoria
       goto bad;
     memmove(mem, (char*)P2V(pa), PGSIZE);
     *pte &= 0xFFF; // pega todas as flags de pte
     *pte &= ~PTE_SHARE; // retira a flag de compartilhamento
     *pte |= V2P(mem) | PTE_W; // insere a permissão de escrita na nova pagina de memória
-    decCountPPN(pa); // Decrementa a quantidade de processos que estão compartilhando a mesma memória
+    dec_Count_PPN(pa); // Decrementa a quantidade de processos que estão compartilhando a mesma memória
   }
   // Se há apenas um processo usando a pagina, basta dar permissão para escrita e retira a flag de compartilhamento
   else {
@@ -565,7 +580,7 @@ int deallocuvm_cow(pde_t *pgdir, uint oldsz, uint newsz)
     return oldsz;
 
   a = PGROUNDUP(newsz);
-  // Será realizada mudanças na shareTable, é necessário bloquea-la, para que não haja problema de concorrência e a torne inválida
+  // Será realizada mudanças na Shared_Table, é necessário bloquea-la, para que não haja problema de concorrência e a torne inválida
   acquire(&tablelock);
   for(; a < oldsz; a += PGSIZE){
     pte = walkpgdir(pgdir, (char*)a, 0);
@@ -577,15 +592,15 @@ int deallocuvm_cow(pde_t *pgdir, uint oldsz, uint newsz)
         panic("kfree");
       // Se a memoria está sendo compartilhada, decrementa a quantidade de processos que estão compartilhando
       // Pois está sendo desalocada do processo atual
-      if (getCountPPN(pa) > 1) {
-        decCountPPN(pa);
+      if (get_Count_PPN(pa) > 1) {
+        dec_Count_PPN(pa);
       }
       // se a memoria não está sendo compartilhada com nenhum outro processo
       // pode ser liberada completamente
       else {
         char *v = P2V(pa);
         kfree(v);
-        decCountPPN(pa);
+        dec_Count_PPN(pa);
       }
       // Faz o ponteiro para page table entry apontar para null
       *pte = 0;

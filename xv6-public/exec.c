@@ -39,7 +39,7 @@ exec(char *path, char **argv)
     goto bad;
 
  // Load program into memory.
- 
+
   // sz recebia a pagina  para a inicialização
 
   // sz = 0
@@ -62,7 +62,7 @@ exec(char *path, char **argv)
       goto bad;
     if(ph.vaddr % PGSIZE != 0)
       goto bad;
-    if(loaduvm(pgdir, (char*)ph.vaddr, ip, ph.off, ph.filesz) < 0)
+    if(loaduvm(pgdir, (char*)ph.vaddr, ip, ph.off, ph.filesz, ph.flags) < 0)
       goto bad;
   }
   iunlockput(ip);

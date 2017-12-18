@@ -586,7 +586,7 @@ void procdump(void)
                 		cprintf("   	ptbl PTE %d", pageindex);
                 		cprintf(", %p", (PTE_ADDR(ptabentry_virt[pageindex]) >> 12));
                 		cprintf(", %p", PTE_ADDR(ptabentry_virt[pageindex]));
-                		cprintf(", SHARE: %d\n", getCountPPN(PTE_ADDR(ptabentry_virt[pageindex])));
+                		cprintf(", SHARE: %d\n", get_Count_PPN(PTE_ADDR(ptabentry_virt[pageindex])));
             		}
         		}
     		}
