@@ -499,7 +499,7 @@ void handle_pgflt(void){
   // Se o endereço que tentou ser acessado foi o 0 - avisar que foi um
   // null pointer Exception
   if (addr == 0) {
-    cprintf("Segmentation Fault - Null Pointer Dereference\n");
+    cprintf("Task 2: Null pointer protection. Error: Segmentation Fault\n");
     kill(myproc()->pid);
   }
   // Se o processo possui paginas compartilhadas, realiza a cópia da memoria
